@@ -4,32 +4,54 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.Nullable;
+import android.util.Log;
 import android.view.MenuItem;
+
+import com.crashlytics.android.Crashlytics;
 
 import java.util.Locale;
 
 import de.bitshares_munich.utils.Application;
 import de.bitshares_munich.utils.Helper;
+import io.fabric.sdk.android.Fabric;
 
 /**
  * Created by qasim on 5/9/16.
  */
 public class BaseActivity extends LockableActivity {
+    public final String TAG = "BaseActivity";
 
     public static final long DISCONNECT_TIMEOUT = (3*60*1000);
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if(BuildConfig.USE_CRASHLYTICS){
+            Fabric.with(this, new Crashlytics());
+            Log.d(TAG, "Using crashlytics");
+        }else{
+            Log.d(TAG, "Not using crashlytics");
+        }
 
+        //If app language preferences aren't set, get language device language
         String language = Helper.fetchStringSharePref(getApplicationContext(), getString(R.string.pref_language));
+
         if(!language.equals(""))
-        Helper.setLocale(language,getResources());
+        {
+            Helper.setLocale(language,getResources());
+        }
         else {
             language = Locale.getDefault().getLanguage();
             Helper.storeStringSharePref(getApplicationContext(), getString(R.string.pref_language) , language);
             Helper.setLocale(language,getResources());
         }
+        //Check automatically close app behavior (after 3 min) is set and if not, put true by default
+        Boolean closeAppPref = Helper.checkSharedPref(getApplicationContext(), "close_bitshare");
+        if(!closeAppPref)
+        {
+            Helper.storeBoolianSharePref(getApplicationContext(), "close_bitshare", true);
+        }
+
     }
 
     public void setBackButton(Boolean isBackButton) {
@@ -88,6 +110,14 @@ public class BaseActivity extends LockableActivity {
         super.onResume();
         Application.setCurrentActivity(this);
         resetDisconnectTimer();
+
+        Application.send(getString(R.string.subscribe_callback));
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Application.send(getString(R.string.cancel_subscriptions));
     }
 
     @Override
@@ -95,5 +125,4 @@ public class BaseActivity extends LockableActivity {
         super.onStop();
         stopDisconnectTimer();
     }
-
 }

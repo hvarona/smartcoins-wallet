@@ -15,6 +15,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.BaseAdapter;
@@ -32,9 +33,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 
-import de.bitshares_munich.Interfaces.InternalMovementListener;
 import de.bitshares_munich.utils.Helper;
-import de.bitshares_munich.utils.SupportMethods;
 import de.bitshares_munich.utils.TinyDB;
 
 /**
@@ -102,7 +101,6 @@ public class ContactListAdapter extends BaseAdapter {
         ImageButton ibEdit = (ImageButton) convertView.findViewById(R.id.editcontact);
         ibEdit.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                ((InternalMovementListener)context).onInternalAppMove();
                 int index = position;
                 Intent intent = new Intent(context, AddEditContacts.class);
                 intent.putExtra("id", index);
@@ -149,7 +147,7 @@ public class ContactListAdapter extends BaseAdapter {
         return contactlist;
     }
 
-    public static class ListviewContactItem{
+    public static class ListviewContactItem {
         String name;
         String email;
         String account;
@@ -181,12 +179,10 @@ public class ContactListAdapter extends BaseAdapter {
         String GetEmail(){
             return email;
         }
-
-
     }
 
 
-        private void loadWebView(WebView webView , int size, String encryptText) {
+    private void loadWebView(WebView webView , int size, String encryptText) {
         String htmlShareAccountName = "<html><head><style>body,html { margin:0; padding:0; text-align:center;}</style><meta name=viewport content=width=" + size + ",user-scalable=no/></head><body><canvas width=" + size + " height=" + size + " data-jdenticon-hash=" + encryptText + "></canvas><script src=https://cdn.jsdelivr.net/jdenticon/1.3.2/jdenticon.min.js async></script></body></html>";
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
@@ -199,39 +195,47 @@ public class ContactListAdapter extends BaseAdapter {
         contacts.remove(id);
         tinyDB.putContactsObject("Contacts", contacts);
     }
+
     public void loadmore(){
         pos=0;
         listContact.clear();
     }
 
     public void showDialog(final int position){
-                final Dialog dialog = new Dialog(context);
-                dialog.setContentView(R.layout.alert_delete_dialog);
-                Button btnDone = (Button) dialog.findViewById(R.id.btnDone);
-                Button btnCancel = (Button) dialog.findViewById(R.id.btnCancel);
-                TextView textView = (TextView) dialog.findViewById(R.id.alertMsg);
+        final Dialog dialog = new Dialog(context);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(R.layout.alert_confirmation_dialog);
+        Button btnDone = (Button) dialog.findViewById(R.id.btnDone);
+        btnDone.setText(context.getString(R.string.delete));
+        Button btnCancel = (Button) dialog.findViewById(R.id.btnCancel);
+        TextView textView = (TextView) dialog.findViewById(R.id.alertMsg);
+
+
         String alertMsg =  context.getString(R.string.delete);
         String accountName = listContact.get(position).GetAccount();
-            alertMsg = alertMsg + " \"" + accountName + "\" ?";
+        alertMsg = alertMsg + " \"" + accountName + "\" ?";
         textView.setText(alertMsg);
 
-        btnDone.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        listContact.remove(position);
+        Log.e("Error", alertMsg);
 
-                        removeFromlist(position);
-                        notifyDataSetChanged();
-                        dialog.cancel();
-                    }
-                });
-                btnCancel.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                      public void onClick(View v) {
-                            dialog.cancel();
-                         }
-                   });
-                dialog.show();
+
+        btnDone.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                listContact.remove(position);
+
+                removeFromlist(position);
+                notifyDataSetChanged();
+                dialog.cancel();
+            }
+        });
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.cancel();
+            }
+        });
+        dialog.show();
 
 
     }
@@ -259,7 +263,6 @@ public class ContactListAdapter extends BaseAdapter {
             } catch (Exception e) {
                 Log.e("Error", e.getMessage());
                 e.printStackTrace();
-                SupportMethods.testing("alpha",e.getMessage(),"error");
             }
             return mIcon11;
         }
