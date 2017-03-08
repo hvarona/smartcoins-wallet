@@ -1,6 +1,5 @@
 package de.bitshares_munich.smartcoinswallet;
 
-import android.app.Activity;
 import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.Intent;
@@ -22,6 +21,7 @@ import ar.com.daidalos.afiledialog.FileChooserLabels;
 import butterknife.Bind;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
+import de.bitshares_munich.database.SCWallDatabase;
 import de.bitshares_munich.models.AccountDetails;
 import de.bitshares_munich.utils.Application;
 import de.bitshares_munich.utils.BinHelper;
@@ -37,6 +37,7 @@ import de.bitsharesmunich.graphenej.interfaces.WitnessResponseListener;
 import de.bitsharesmunich.graphenej.models.AccountProperties;
 import de.bitsharesmunich.graphenej.models.BaseResponse;
 import de.bitsharesmunich.graphenej.models.WitnessResponse;
+import de.bitsharesmunich.graphenej.models.backup.WalletBackup;
 
 public class ImportBackupActivity extends BaseActivity {
     private final String TAG = this.getClass().getName();
@@ -47,9 +48,13 @@ public class ImportBackupActivity extends BaseActivity {
     @Bind(R.id.etPinBin)
     EditText etPinBin;
 
+    @Bind(R.id.etExistingPassword)
+    EditText etExistingPassword;
+
     ArrayList<Integer> bytes;
 
-    Activity myActivity;
+    /* Database interface */
+    private SCWallDatabase database;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,27 +63,29 @@ public class ImportBackupActivity extends BaseActivity {
         setTitle(getResources().getString(R.string.app_name));
         ButterKnife.bind(this);
         setBackButton(true);
-        myActivity = this;
         progressDialog = new ProgressDialog(this);
+        database = new SCWallDatabase(this);
     }
 
     @OnClick(R.id.btnChooseFile)
-    public void onChooseFile(){
+    public void onChooseFile() {
         chooseBinFile();
     }
 
     @OnClick(R.id.btnWalletBin)
-    public void onClickbtnWalletBin()
-    {
+    public void onClickbtnWalletBin() {
+        String currentPassword = etExistingPassword.getText().toString();
         String pinText = etPinBin.getText().toString();
 
-        if(pinText.length() == 0){
+        if (currentPassword.length() == 0) {
+            Toast.makeText(this, getResources().getString(R.string.missing_existing_password), Toast.LENGTH_SHORT).show();
+        } else if (pinText.length() == 0) {
             Toast.makeText(this, getResources().getString(R.string.pin_number_request), Toast.LENGTH_SHORT).show();
-        }else if(pinText.length() < 6){
+        } else if (pinText.length() < 6) {
             Toast.makeText(this, getResources().getString(R.string.pin_number_warning), Toast.LENGTH_SHORT).show();
-        }else{
-            showDialog("",getString(R.string.importing_keys_from_bin_file));
-            recoverAccountFromBackup(pinText);
+        } else {
+            showDialog("", getString(R.string.importing_keys_from_bin_file));
+            recoverAccountFromBackup(currentPassword, pinText);
         }
     }
 
@@ -126,7 +133,7 @@ public class ImportBackupActivity extends BaseActivity {
         }
     };
 
-    void onSuccess(String filepath){
+    void onSuccess(String filepath) {
         PermissionManager manager = new PermissionManager();
         manager.verifyStoragePermissions(this);
 
@@ -134,6 +141,7 @@ public class ImportBackupActivity extends BaseActivity {
     }
 
     ProgressDialog progressDialog;
+
     private void showDialog(String title, String msg) {
         if (progressDialog != null) {
             if (!progressDialog.isShowing()) {
@@ -154,19 +162,32 @@ public class ImportBackupActivity extends BaseActivity {
 
     }
 
-    public void recoverAccountFromBackup(final String pin) {
+    public void recoverAccountFromBackup(String existingPassword, final String pin) {
         try {
             byte[] byteArray = new byte[bytes.size()];
-            for(int i = 0 ; i < bytes.size();i++){
+            for (int i = 0; i < bytes.size(); i++) {
                 byteArray[i] = bytes.get(i).byteValue();
             }
-            final String brainKey = FileBin.getBrainkeyFromByte(byteArray, pin);
+            String brainKey;
+            brainKey = FileBin.getBrainkeyFromByte(byteArray, existingPassword);
+            if (brainKey == null) {
+                WalletBackup walletBackup = FileBin.deserializeWalletBackup(byteArray, existingPassword);
+
+                if (walletBackup.getKeyCount() > 0) {
+                    brainKey = walletBackup.getWallet(0).decryptBrainKey(existingPassword);
+                }
+            }
             BrainKey bKey = new BrainKey(brainKey, 0);
+
+            /* Storing brainkey information */
+            database.insertKey(bKey);
+
             Address address = new Address(ECKey.fromPublicOnly(bKey.getPrivateKey().getPubKey()));
             final String privkey = Crypt.getInstance().encrypt_string(bKey.getWalletImportFormat());
             final String pubkey = address.toString();
-            Log.d(TAG, "Got brain key: "+brainKey);
-            Log.d(TAG, "Looking up keys for address: "+address.toString());
+            Log.d(TAG, "Got brain key: " + brainKey);
+            Log.d(TAG, "Looking up keys for address: " + address.toString());
+            final String finalBrainKey = brainKey;
             new WebsocketWorkerThread(new GetAccountsByAddress(address, new WitnessResponseListener() {
                 @Override
                 public void onSuccess(final WitnessResponse response) {
@@ -175,17 +196,17 @@ public class ImportBackupActivity extends BaseActivity {
                         public void run() {
                             Log.d(TAG, "getAccountByAddress.onSuccess");
                             List<List<UserAccount>> resp = (List<List<UserAccount>>) response.result;
-                            if(resp.size() > 0){
+                            if (resp.size() > 0) {
                                 List<UserAccount> accounts = resp.get(0);
-                                if(accounts.size() == 0){
+                                if (accounts.size() == 0) {
                                     Log.w(TAG, "Found no account using the key given by backup.");
                                     Toast.makeText(ImportBackupActivity.this, getResources().getString(R.string.backup_no_keys_found_error), Toast.LENGTH_LONG).show();
-                                }else{
-                                    for(UserAccount account : accounts){
-                                        getAccountById(account.getObjectId(), privkey, pubkey, brainKey, pin);
+                                } else {
+                                    for (UserAccount account : accounts) {
+                                        getAccountById(account.getObjectId(), privkey, pubkey, finalBrainKey, pin);
                                     }
                                 }
-                            }else{
+                            } else {
                                 Log.w(TAG, "Invalid address");
                                 Toast.makeText(getApplicationContext(), R.string.error_invalid_account, Toast.LENGTH_SHORT).show();
                             }
@@ -199,7 +220,7 @@ public class ImportBackupActivity extends BaseActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Log.e(TAG,"onError. Msg: "+error.message);
+                            Log.e(TAG, "onError. Msg: " + error.message);
                             hideDialog();
                             Toast.makeText(getApplicationContext(), R.string.unable_to_load_brainkey, Toast.LENGTH_SHORT).show();
                         }
@@ -208,12 +229,11 @@ public class ImportBackupActivity extends BaseActivity {
             }), 0).start();
         } catch (Exception e) {
             hideDialog();
-            Toast.makeText(myActivity, myActivity.getString(R.string.please_make_sure_your_bin_file), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, getString(R.string.please_make_sure_your_bin_file), Toast.LENGTH_LONG).show();
         }
-
     }
 
-    private void getAccountById(final String accountId, final String privaKey, final String pubKey, final String brainkey, final String pinCode){
+    private void getAccountById(final String accountId, final String privaKey, final String pubKey, final String brainkey, final String pinCode) {
         Log.d(TAG, "getAccountById");
         try {
             new WebsocketWorkerThread((new GetAccounts(accountId, new WitnessResponseListener() {
@@ -241,11 +261,10 @@ public class ImportBackupActivity extends BaseActivity {
                                 app.setLock(false);
 
                                 BinHelper myBinHelper = new BinHelper();
-                                myBinHelper.addWallet(accountDetails, getApplicationContext(),myActivity);
+                                myBinHelper.addWallet(accountDetails, getApplicationContext(), ImportBackupActivity.this);
                                 Intent intent;
                                 int numberOfAccounts = myBinHelper.numberOfWalletAccounts(getApplicationContext());
-                                Log.d(TAG,String.format("number of accounts: %d", numberOfAccounts));
-                                if ( myBinHelper.numberOfWalletAccounts(getApplicationContext()) <= 1 ) {
+                                if (myBinHelper.numberOfWalletAccounts(getApplicationContext()) <= 1) {
                                     intent = new Intent(getApplicationContext(), BackupBrainkeyActivity.class);
                                 } else {
                                     intent = new Intent(getApplicationContext(), TabActivity.class);
@@ -273,14 +292,10 @@ public class ImportBackupActivity extends BaseActivity {
         } catch (Exception e) {
             Toast.makeText(getApplicationContext(), R.string.txt_no_internet_connection, Toast.LENGTH_SHORT).show();
         }
-
-
     }
 
     @OnClick(R.id.btnCancelBin)
-    public void OnCancel(Button button){
+    public void OnCancel(Button button) {
         this.finish();
     }
-
-
 }
